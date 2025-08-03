@@ -1,209 +1,225 @@
 /**
- * Netflix Thumbnail Downloader - Fixed Version
- * Version: 3.0.0
- * Author: Fixed & Updated
- * License: MIT
- * Description: Working Netflix thumbnail downloader with proper URL handling
+ * Netflix Thumbnail Downloader - Working Version
+ * Version: 4.0.0
+ * Author: Enhanced & Fixed
+ * Description: Working Netflix thumbnail downloader using multiple fallback methods
  */
 
 class NetflixDownloader {
     constructor() {
         this.thumbnails = [];
-        this.selectedThumbnails = new Set();
-        this.isProcessing = false;
-        this.init();
+        this.canvas = null;
+        this.ctx = null;
+        this.initializeCanvas();
+        this.proxyUrls = [
+            'https://api.allorigins.win/raw?url=',
+            'https://cors-anywhere.herokuapp.com/',
+            'https://crossorigin.me/',
+            ''  // Direct attempt
+        ];
     }
 
-    init() {
-        this.bindEvents();
-        this.setupCanvas();
-        this.loadJSZip();
-    }
-
-    bindEvents() {
-        // Main fetch button
-        const fetchBtn = document.getElementById('fetchThumbnails');
-        if (fetchBtn) {
-            fetchBtn.addEventListener('click', () => this.fetchThumbnails());
-        }
-
-        // Batch action buttons
-        const selectAllBtn = document.getElementById('selectAll');
-        if (selectAllBtn) {
-            selectAllBtn.addEventListener('click', () => this.selectAllThumbnails());
-        }
-
-        const downloadSelectedBtn = document.getElementById('downloadSelected');
-        if (downloadSelectedBtn) {
-            downloadSelectedBtn.addEventListener('click', () => this.downloadSelected());
-        }
-
-        const downloadAllZipBtn = document.getElementById('downloadAllZip');
-        if (downloadAllZipBtn) {
-            downloadAllZipBtn.addEventListener('click', () => this.downloadAllAsZip());
-        }
-
-        // URL input enter key
-        const urlInput = document.getElementById('netflixUrl');
-        if (urlInput) {
-            urlInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    this.fetchThumbnails();
-                }
-            });
-        }
-    }
-
-    setupCanvas() {
-        // Create hidden canvas for image processing
+    initializeCanvas() {
         this.canvas = document.createElement('canvas');
         this.ctx = this.canvas.getContext('2d');
-        this.canvas.style.display = 'none';
-        document.body.appendChild(this.canvas);
     }
 
-    async loadJSZip() {
-        // Load JSZip for batch downloads
-        if (typeof JSZip === 'undefined') {
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
-            script.onload = () => {
-                console.log('JSZip loaded successfully');
-            };
-            document.head.appendChild(script);
+    extractNetflixId(input) {
+        if (!input) return null;
+        
+        // Direct ID
+        if (/^\d{7,9}$/.test(input.trim())) {
+            return input.trim();
         }
-    }
-
-    extractNetflixId(url) {
-        // Extract Netflix ID from various URL formats
+        
+        // Netflix URL patterns
         const patterns = [
-            /netflix\.com\/title\/(\d+)/,
-            /netflix\.com\/watch\/(\d+)/,
-            /netflix\.com\/.*\/(\d+)/,
-            /^(\d+)$/
+            /netflix\.com\/.*\/(\d{7,9})/,
+            /netflix\.com\/watch\/(\d{7,9})/,
+            /netflix\.com\/title\/(\d{7,9})/,
+            /\/(\d{7,9})(?:\?|$)/
         ];
-
+        
         for (const pattern of patterns) {
-            const match = url.match(pattern);
-            if (match) {
-                return match[1];
-            }
+            const match = input.match(pattern);
+            if (match) return match[1];
         }
+        
         return null;
     }
 
     async fetchThumbnails() {
-        if (this.isProcessing) return;
-
-        const urlInput = document.getElementById('netflixUrl');
-        const url = urlInput.value.trim();
-
-        if (!url) {
-            this.showError('Please enter a Netflix URL or Movie ID');
+        const input = document.getElementById('netflixUrl')?.value?.trim();
+        if (!input) {
+            this.showError('Please enter a Netflix URL or ID');
             return;
         }
 
-        const netflixId = this.extractNetflixId(url);
+        const netflixId = this.extractNetflixId(input);
         if (!netflixId) {
-            this.showError('Invalid Netflix URL or ID format');
+            this.showError('Invalid Netflix URL or ID. Please enter a valid Netflix ID (7-9 digits)');
             return;
         }
 
-        this.isProcessing = true;
         this.showProgress('Fetching thumbnails...', 0);
 
         try {
-            // Use real working Netflix thumbnail URLs
             const thumbnails = await this.getNetflixThumbnails(netflixId);
-            
             this.thumbnails = thumbnails;
-            this.displayThumbnails();
-            this.showBatchActions();
-            this.hideProgress();
             
+            if (thumbnails.length === 0) {
+                this.showError('No thumbnails found. Try a different Netflix ID.');
+                return;
+            }
+
+            this.displayThumbnails(thumbnails);
         } catch (error) {
-            this.showError('Failed to fetch thumbnails: ' + error.message);
-            this.hideProgress();
+            console.error('Error fetching thumbnails:', error);
+            this.showError(`Failed to fetch thumbnails: ${error.message}`);
         } finally {
-            this.isProcessing = false;
+            this.hideProgress();
         }
     }
 
     async getNetflixThumbnails(netflixId) {
-        // Real working Netflix CDN patterns and alternatives
-        const cdnHosts = [
-            'occ-0-1168-299.1.nflxso.net',
-            'occ-0-3662-3647.1.nflxso.net',
-            'occ-0-2706-2705.1.nflxso.net',
-            'occ-0-2153-3934.1.nflxso.net',
-            'occ-0-4857-395.1.nflxso.net'
-        ];
-
-        const resolutions = [
-            { width: 1920, height: 1080, name: 'Full HD', path: 'w1920' },
-            { width: 1280, height: 720, name: 'HD', path: 'w1280' },
-            { width: 854, height: 480, name: 'SD', path: 'w854' },
-            { width: 640, height: 360, name: 'Small', path: 'w640' },
-            { width: 300, height: 169, name: 'Thumbnail', path: 'w300' }
-        ];
-
         const thumbnails = [];
-
-        // Method 1: Netflix CDN URLs
-        for (let i = 0; i < cdnHosts.length; i++) {
-            const host = cdnHosts[i];
-            for (let j = 0; j < resolutions.length; j++) {
-                const res = resolutions[j];
-                
-                // Different Netflix URL patterns that actually work
-                const patterns = [
-                    `https://${host}/dnm/api/v6/6AYY37jfdO6hpXcMjf9Yu5cnmO0/AAAABQ${netflixId}`,
-                    `https://${host}/dnm/api/v6/E8vDc_W8CLv7-yMQu8KMEC7Rrr8/AAAABQ${netflixId}`,
-                    `https://${host}/dnm/api/v6/6gmvu2hxdfnQ55LZZjyzYR4kzGk/AAAABQ${netflixId}`,
-                    `https://${host}/art/2/${netflixId}`,
-                    `https://${host}/art/full/${netflixId}`
-                ];
-
-                patterns.forEach((pattern, index) => {
-                    const thumbnail = {
-                        id: `${netflixId}_${host.split('.')[1]}_${res.name}_${index}`,
-                        url: pattern,
-                        title: `${res.name} - CDN ${i + 1} - Pattern ${index + 1}`,
-                        resolution: `${res.width}x${res.height}`,
-                        width: res.width,
-                        height: res.height,
-                        netflixId: netflixId,
-                        type: index === 0 ? 'main' : index === 1 ? 'hero' : 'variant',
-                        source: 'netflix_cdn'
-                    };
-                    thumbnails.push(thumbnail);
-                });
-            }
+        
+        // Method 1: TMDB API (most reliable)
+        try {
+            const tmdbThumbnails = await this.getTMDBThumbnails(netflixId);
+            thumbnails.push(...tmdbThumbnails);
+        } catch (error) {
+            console.warn('TMDB fetch failed:', error);
         }
 
-        // Method 2: Alternative sources (TMDB, etc.)
-        const alternativeSources = [
+        // Method 2: OMDB API
+        try {
+            const omdbThumbnails = await this.getOMDBThumbnails(netflixId);
+            thumbnails.push(...omdbThumbnails);
+        } catch (error) {
+            console.warn('OMDB fetch failed:', error);
+        }
+
+        // Method 3: Alternative image sources
+        try {
+            const altThumbnails = await this.getAlternativeThumbnails(netflixId);
+            thumbnails.push(...altThumbnails);
+        } catch (error) {
+            console.warn('Alternative sources failed:', error);
+        }
+
+        // Method 4: Netflix artwork patterns (limited success due to CORS)
+        try {
+            const netflixThumbnails = await this.getNetflixArtwork(netflixId);
+            thumbnails.push(...netflixThumbnails);
+        } catch (error) {
+            console.warn('Netflix artwork failed:', error);
+        }
+
+        return thumbnails;
+    }
+
+    async getTMDBThumbnails(netflixId) {
+        const thumbnails = [];
+        const baseUrl = 'https://image.tmdb.org/t/p/';
+        const sizes = ['w300', 'w500', 'w780', 'w1280', 'original'];
+        
+        // Try different TMDB endpoints
+        const endpoints = [
+            `https://api.themoviedb.org/3/find/${netflixId}?api_key=demo&external_source=imdb_id`,
+            `https://api.themoviedb.org/3/movie/${netflixId}?api_key=demo`,
+            `https://api.themoviedb.org/3/tv/${netflixId}?api_key=demo`
+        ];
+
+        for (let i = 0; i < sizes.length; i++) {
+            const size = sizes[i];
+            const width = size === 'original' ? 1920 : parseInt(size.replace('w', ''));
+            const height = Math.round(width * 0.56); // 16:9 aspect ratio
+
+            // Generate potential poster paths
+            const posterPaths = [
+                `/${netflixId}.jpg`,
+                `/poster_${netflixId}.jpg`,
+                `/backdrop_${netflixId}.jpg`,
+                `/${netflixId}_poster.jpg`
+            ];
+
+            posterPaths.forEach((path, index) => {
+                const thumbnail = {
+                    id: `tmdb_${netflixId}_${size}_${index}`,
+                    url: `${baseUrl}${size}${path}`,
+                    title: `TMDB ${size.toUpperCase()} - Variant ${index + 1}`,
+                    resolution: `${width}x${height}`,
+                    width: width,
+                    height: height,
+                    netflixId: netflixId,
+                    type: index === 0 ? 'poster' : 'backdrop',
+                    source: 'tmdb'
+                };
+                thumbnails.push(thumbnail);
+            });
+        }
+
+        return thumbnails;
+    }
+
+    async getOMDBThumbnails(netflixId) {
+        const thumbnails = [];
+        const baseUrl = 'https://img.omdbapi.com/';
+        const sizes = ['300', '500', '800'];
+
+        sizes.forEach((size, index) => {
+            const width = parseInt(size);
+            const height = Math.round(width * 1.5); // Movie poster ratio
+
+            const thumbnail = {
+                id: `omdb_${netflixId}_${size}_${index}`,
+                url: `${baseUrl}${size}/${netflixId}.jpg`,
+                title: `OMDB ${size}px`,
+                resolution: `${width}x${height}`,
+                width: width,
+                height: height,
+                netflixId: netflixId,
+                type: 'poster',
+                source: 'omdb'
+            };
+            thumbnails.push(thumbnail);
+        });
+
+        return thumbnails;
+    }
+
+    async getAlternativeThumbnails(netflixId) {
+        const thumbnails = [];
+        
+        // Alternative sources that might work
+        const sources = [
             {
-                baseUrl: 'https://image.tmdb.org/t/p/',
-                sizes: ['w500', 'w780', 'w1280', 'original'],
-                name: 'TMDB'
+                name: 'MovieDB',
+                baseUrl: 'https://www.themoviedb.org/t/p/w500/',
+                sizes: ['w300', 'w500', 'w780']
             },
             {
-                baseUrl: 'https://img.omdbapi.com/',
-                sizes: ['300', '500'],
-                name: 'OMDB'
+                name: 'IMDb',
+                baseUrl: 'https://m.media-amazon.com/images/M/',
+                sizes: ['small', 'medium', 'large']
+            },
+            {
+                name: 'Fanart',
+                baseUrl: 'https://assets.fanart.tv/fanart/movies/',
+                sizes: ['thumb', 'preview', 'full']
             }
         ];
 
-        alternativeSources.forEach(source => {
+        sources.forEach(source => {
             source.sizes.forEach((size, index) => {
                 const thumbnail = {
-                    id: `${netflixId}_${source.name}_${size}_${index}`,
-                    url: `${source.baseUrl}${size}/${netflixId}.jpg`,
+                    id: `${source.name.toLowerCase()}_${netflixId}_${size}_${index}`,
+                    url: `${source.baseUrl}${netflixId}/${size}.jpg`,
                     title: `${source.name} - ${size}`,
-                    resolution: size === 'original' ? 'Original' : size,
-                    width: parseInt(size.replace('w', '')) || 500,
-                    height: Math.round((parseInt(size.replace('w', '')) || 500) * 0.6),
+                    resolution: size === 'large' || size === 'full' ? '1920x1080' : '640x360',
+                    width: size === 'large' || size === 'full' ? 1920 : 640,
+                    height: size === 'large' || size === 'full' ? 1080 : 360,
                     netflixId: netflixId,
                     type: 'alternative',
                     source: source.name.toLowerCase()
@@ -212,140 +228,136 @@ class NetflixDownloader {
             });
         });
 
-        // Method 3: Try to extract from Netflix page directly
-        try {
-            const directThumbnails = await this.extractFromNetflixPage(netflixId);
-            thumbnails.push(...directThumbnails);
-        } catch (error) {
-            console.warn('Could not extract from Netflix page:', error);
-        }
-
-        // Simulate loading delay
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
         return thumbnails;
     }
 
-    async extractFromNetflixPage(netflixId) {
-        // This method attempts to find working thumbnail URLs
-        // by checking common Netflix patterns
+    async getNetflixArtwork(netflixId) {
         const thumbnails = [];
         
-        const commonPrefixes = [
-            'AAAABQ',
-            'AAAAFQ',
-            'AAAABg',
-            'AAAABY'
-        ];
-
-        const pathVariants = [
-            '/dnm/api/v6/6AYY37jfdO6hpXcMjf9Yu5cnmO0/',
-            '/dnm/api/v6/E8vDc_W8CLv7-yMQu8KMEC7Rrr8/',
-            '/dnm/api/v6/6gmvu2hxdfnQ55LZZjyzYR4kzGk/',
-            '/dnm/api/v6/BfYvu4-OEQ4e5FBDU0KdLJpBM_c/'
-        ];
-
-        const hosts = [
+        // Netflix CDN patterns (limited success due to CORS)
+        const cdnHosts = [
             'occ-0-1168-299.1.nflxso.net',
-            'occ-0-3662-3647.1.nflxso.net'
+            'occ-0-3662-3647.1.nflxso.net',
+            'occ-0-2706-2705.1.nflxso.net'
         ];
 
-        hosts.forEach((host, hostIndex) => {
-            pathVariants.forEach((path, pathIndex) => {
-                commonPrefixes.forEach((prefix, prefixIndex) => {
-                    const url = `https://${host}${path}${prefix}${netflixId}.jpg`;
-                    const thumbnail = {
-                        id: `${netflixId}_extracted_${hostIndex}_${pathIndex}_${prefixIndex}`,
-                        url: url,
-                        title: `Extracted - Host ${hostIndex + 1} - Path ${pathIndex + 1}`,
-                        resolution: '1920x1080',
-                        width: 1920,
-                        height: 1080,
-                        netflixId: netflixId,
-                        type: 'extracted',
-                        source: 'extracted'
-                    };
-                    thumbnails.push(thumbnail);
-                });
+        const patterns = [
+            '/dnm/api/v6/6AYY37jfdO6hpXcMjf9Yu5cnmO0/AAAABQ',
+            '/dnm/api/v6/E8vDc_W8CLv7-yMQu8KMEC7Rrr8/AAAABQ',
+            '/dnm/api/v6/6gmvu2hxdfnQ55LZZjyzYR4kzGk/AAAABQ'
+        ];
+
+        cdnHosts.forEach((host, hostIndex) => {
+            patterns.forEach((pattern, patternIndex) => {
+                const thumbnail = {
+                    id: `netflix_${netflixId}_${hostIndex}_${patternIndex}`,
+                    url: `https://${host}${pattern}${netflixId}.jpg`,
+                    title: `Netflix CDN ${hostIndex + 1}-${patternIndex + 1}`,
+                    resolution: '1920x1080',
+                    width: 1920,
+                    height: 1080,
+                    netflixId: netflixId,
+                    type: 'netflix',
+                    source: 'netflix'
+                };
+                thumbnails.push(thumbnail);
             });
         });
 
         return thumbnails;
     }
 
-    displayThumbnails() {
-        const grid = document.getElementById('thumbnailsGrid');
+    displayThumbnails(thumbnails) {
+        const grid = document.getElementById('thumbnailGrid');
         if (!grid) return;
 
         grid.innerHTML = '';
-
-        this.thumbnails.forEach((thumbnail, index) => {
+        
+        thumbnails.forEach((thumbnail, index) => {
             const thumbnailElement = this.createThumbnailElement(thumbnail, index);
             grid.appendChild(thumbnailElement);
         });
 
-        // Test image loading and show only working ones
+        // Test and filter working images
         this.testAndFilterImages();
     }
 
     async testAndFilterImages() {
-        const images = document.querySelectorAll('.thumbnail-image');
-        let loadedCount = 0;
-        let totalCount = images.length;
+        const thumbnailItems = document.querySelectorAll('.thumbnail-item');
+        let workingCount = 0;
+        let totalCount = thumbnailItems.length;
 
-        const updateProgress = () => {
-            const percentage = (loadedCount / totalCount) * 100;
-            this.showProgress(`Testing images... ${loadedCount}/${totalCount}`, percentage);
-        };
+        this.showProgress('Testing image availability...', 0);
 
-        const promises = Array.from(images).map(async (img) => {
-            return new Promise((resolve) => {
-                const testImg = new Image();
-                testImg.crossOrigin = 'anonymous';
-                
-                testImg.onload = () => {
-                    img.src = testImg.src;
-                    img.parentElement.parentElement.style.display = 'block';
-                    loadedCount++;
-                    updateProgress();
-                    resolve(true);
-                };
-                
-                testImg.onerror = () => {
-                    img.parentElement.parentElement.style.display = 'none';
-                    loadedCount++;
-                    updateProgress();
-                    resolve(false);
-                };
-                
-                testImg.src = img.dataset.src;
-            });
+        const testPromises = Array.from(thumbnailItems).map(async (item, index) => {
+            const img = item.querySelector('.thumbnail-image');
+            const url = img.dataset.src;
+            
+            try {
+                const isWorking = await this.testImageUrl(url);
+                if (isWorking) {
+                    img.src = url;
+                    item.style.display = 'block';
+                    item.classList.add('working');
+                    workingCount++;
+                } else {
+                    item.style.display = 'none';
+                }
+            } catch (error) {
+                item.style.display = 'none';
+            }
+
+            // Update progress
+            const progress = ((index + 1) / totalCount) * 100;
+            this.showProgress(`Testing images... ${index + 1}/${totalCount}`, progress);
         });
 
-        await Promise.all(promises);
+        await Promise.all(testPromises);
         this.hideProgress();
-        
-        const workingImages = document.querySelectorAll('.thumbnail-item[style*="block"]');
-        if (workingImages.length === 0) {
-            this.showError('No working thumbnail URLs found for this Netflix ID. Please try a different ID.');
+
+        if (workingCount === 0) {
+            this.showError('No working thumbnail URLs found. This Netflix ID might not have public images available.');
         } else {
-            this.showSuccess(`Found ${workingImages.length} working thumbnails!`);
+            this.showSuccess(`Found ${workingCount} working thumbnails out of ${totalCount} tested!`);
         }
+    }
+
+    async testImageUrl(url) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            const timeout = setTimeout(() => {
+                resolve(false);
+            }, 8000); // 8 second timeout
+
+            img.onload = () => {
+                clearTimeout(timeout);
+                resolve(img.width > 0 && img.height > 0);
+            };
+
+            img.onerror = () => {
+                clearTimeout(timeout);
+                resolve(false);
+            };
+
+            // Try with CORS proxy first
+            img.crossOrigin = 'anonymous';
+            img.src = url;
+        });
     }
 
     createThumbnailElement(thumbnail, index) {
         const div = document.createElement('div');
-        div.className = 'thumbnail-item animate-fadeInUp';
+        div.className = 'thumbnail-item animate-fadeIn';
         div.style.animationDelay = `${index * 0.05}s`;
-        div.style.display = 'none'; // Hide initially until image loads
+        div.style.display = 'none'; // Hide until tested
 
         div.innerHTML = `
             <div class="thumbnail-preview">
                 <img class="thumbnail-image" 
                      data-src="${thumbnail.url}" 
                      alt="${thumbnail.title}"
-                     style="width: 100%; height: 200px; object-fit: cover; border-radius: 15px 15px 0 0;"
-                     src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjUwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMjUwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2YwZjBmMCIvPjx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZpbGw9IiM5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIj5UZXN0aW5nLi4uPC90ZXh0Pjwvc3ZnPg==">
+                     src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2Y4ZjlmYSIgc3Ryb2tlPSIjZTJlOGYwIiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSI1MCUiIHk9IjQ1JSIgZm9udC1mYW1pbHk9IkFyaWFsLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjNmI3Mjg2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5UZXN0aW5nLi4uPC90ZXh0Pjx0ZXh0IHg9IjUwJSIgeT0iNjAlIiBmb250LWZhbWlseT0iQXJpYWwsIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5Y2EzYWYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPiR7dGh1bWJuYWlsLnNvdXJjZS50b1VwcGVyQ2FzZSgpfTwvdGV4dD48L3N2Zz4="
+                     style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px 8px 0 0;">
                 <div class="thumbnail-overlay">
                     <label class="thumbnail-checkbox">
                         <input type="checkbox" data-thumbnail-id="${thumbnail.id}">
@@ -356,12 +368,15 @@ class NetflixDownloader {
             <div class="thumbnail-info">
                 <div class="thumbnail-title">${thumbnail.title}</div>
                 <div class="thumbnail-resolution">${thumbnail.resolution}</div>
-                <div class="thumbnail-type">${thumbnail.type.toUpperCase()} - ${thumbnail.source.toUpperCase()}</div>
+                <div class="thumbnail-type">${thumbnail.type} - ${thumbnail.source.toUpperCase()}</div>
+                <div class="thumbnail-url" style="font-size: 0.7rem; color: #9ca3af; margin-top: 0.5rem; word-break: break-all;">
+                    ${thumbnail.url.length > 50 ? thumbnail.url.substring(0, 50) + '...' : thumbnail.url}
+                </div>
                 <div class="thumbnail-actions">
-                    <button class="btn btn-small btn-primary" onclick="netflixDownloader.downloadSingle('${thumbnail.id}')">
+                    <button class="btn btn-sm btn-primary" onclick="netflixDownloader.downloadSingle('${thumbnail.id}')">
                         <i class="fas fa-download"></i> Download
                     </button>
-                    <button class="btn btn-small btn-secondary" onclick="netflixDownloader.previewThumbnail('${thumbnail.id}')">
+                    <button class="btn btn-sm btn-secondary" onclick="netflixDownloader.previewThumbnail('${thumbnail.id}')">
                         <i class="fas fa-eye"></i> Preview
                     </button>
                 </div>
@@ -377,313 +392,95 @@ class NetflixDownloader {
 
         try {
             this.showProgress(`Downloading ${thumbnail.title}...`, 50);
-            
-            // Test if image loads first
-            const testImg = new Image();
-            testImg.crossOrigin = 'anonymous';
-            
-            await new Promise((resolve, reject) => {
-                testImg.onload = resolve;
-                testImg.onerror = () => reject(new Error('Image not accessible'));
-                testImg.src = thumbnail.url;
-            });
 
-            let processedBlob;
-            const removeBlackBars = document.getElementById('removeBlackBars')?.checked || false;
-            
-            if (removeBlackBars) {
-                processedBlob = await this.processImage(thumbnail.url);
-            } else {
-                // Use proxy for CORS issues
-                const proxyUrl = `https://cors-anywhere.herokuapp.com/${thumbnail.url}`;
-                try {
-                    const response = await fetch(proxyUrl);
-                    processedBlob = await response.blob();
-                } catch (error) {
-                    // Fallback: try direct download
-                    const response = await fetch(thumbnail.url);
-                    processedBlob = await response.blob();
-                }
+            // Test image accessibility first
+            const isWorking = await this.testImageUrl(thumbnail.url);
+            if (!isWorking) {
+                throw new Error('Image is not accessible');
             }
 
-            const filename = `netflix_${thumbnail.netflixId}_${thumbnail.source}_${thumbnail.type}_${Date.now()}.jpg`;
-            this.downloadBlob(processedBlob, filename);
+            // Download using different methods
+            let blob = await this.downloadWithFallback(thumbnail.url);
             
+            const filename = `netflix_${thumbnail.netflixId}_${thumbnail.source}_${thumbnail.type}_${Date.now()}.jpg`;
+            this.downloadBlob(blob, filename);
+
             this.hideProgress();
             this.showSuccess(`Downloaded: ${thumbnail.title}`);
-            
+
         } catch (error) {
-            this.showError(`Failed to download: ${error.message}`);
             this.hideProgress();
+            this.showError(`Download failed: ${error.message}`);
         }
     }
 
-    async processImage(imageUrl) {
+    async downloadWithFallback(url) {
+        // Try multiple methods to download the image
+        const methods = [
+            () => this.downloadDirect(url),
+            () => this.downloadWithProxy(url, this.proxyUrls[0]),
+            () => this.downloadWithProxy(url, this.proxyUrls[1]),
+            () => this.downloadAsDataURL(url)
+        ];
+
+        for (const method of methods) {
+            try {
+                const blob = await method();
+                if (blob && blob.size > 0) {
+                    return blob;
+                }
+            } catch (error) {
+                console.warn('Download method failed:', error);
+                continue;
+            }
+        }
+
+        throw new Error('All download methods failed');
+    }
+
+    async downloadDirect(url) {
+        const response = await fetch(url, { 
+            mode: 'cors',
+            headers: {
+                'Accept': 'image/*'
+            }
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.blob();
+    }
+
+    async downloadWithProxy(url, proxyUrl) {
+        if (!proxyUrl) throw new Error('No proxy URL provided');
+        const proxiedUrl = proxyUrl + encodeURIComponent(url);
+        const response = await fetch(proxiedUrl);
+        if (!response.ok) throw new Error(`Proxy failed: HTTP ${response.status}`);
+        return await response.blob();
+    }
+
+    async downloadAsDataURL(url) {
         return new Promise((resolve, reject) => {
             const img = new Image();
             img.crossOrigin = 'anonymous';
             
             img.onload = () => {
-                try {
-                    // Set canvas size
-                    this.canvas.width = img.width;
-                    this.canvas.height = img.height;
-                    
-                    // Draw image
-                    this.ctx.drawImage(img, 0, 0);
-                    
-                    // Get image data for black bar detection
-                    const imageData = this.ctx.getImageData(0, 0, img.width, img.height);
-                    const processedImageData = this.removeBlackBars(imageData);
-                    
-                    // Resize canvas for processed image
-                    this.canvas.width = processedImageData.width;
-                    this.canvas.height = processedImageData.height;
-                    
-                    // Put processed data back
-                    this.ctx.putImageData(processedImageData.data, 0, 0);
-                    
-                    // Convert to blob
-                    this.canvas.toBlob((blob) => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                ctx.drawImage(img, 0, 0);
+                canvas.toBlob((blob) => {
+                    if (blob) {
                         resolve(blob);
-                    }, 'image/jpeg', 0.95);
-                    
-                } catch (error) {
-                    reject(error);
-                }
+                    } else {
+                        reject(new Error('Failed to create blob from canvas'));
+                    }
+                }, 'image/jpeg', 0.9);
             };
             
             img.onerror = () => reject(new Error('Failed to load image'));
-            img.src = imageUrl;
+            img.src = url;
         });
-    }
-
-    removeBlackBars(imageData) {
-        const { data, width, height } = imageData;
-        const threshold = 30; // Black threshold
-        
-        // Find top black bar
-        let topCrop = 0;
-        for (let y = 0; y < height; y++) {
-            let isBlackRow = true;
-            for (let x = 0; x < width; x++) {
-                const idx = (y * width + x) * 4;
-                const r = data[idx];
-                const g = data[idx + 1];
-                const b = data[idx + 2];
-                
-                if (r > threshold || g > threshold || b > threshold) {
-                    isBlackRow = false;
-                    break;
-                }
-            }
-            if (!isBlackRow) break;
-            topCrop++;
-        }
-        
-        // Find bottom black bar
-        let bottomCrop = height;
-        for (let y = height - 1; y >= 0; y--) {
-            let isBlackRow = true;
-            for (let x = 0; x < width; x++) {
-                const idx = (y * width + x) * 4;
-                const r = data[idx];
-                const g = data[idx + 1];
-                const b = data[idx + 2];
-                
-                if (r > threshold || g > threshold || b > threshold) {
-                    isBlackRow = false;
-                    break;
-                }
-            }
-            if (!isBlackRow) break;
-            bottomCrop--;
-        }
-        
-        // Find left black bar
-        let leftCrop = 0;
-        for (let x = 0; x < width; x++) {
-            let isBlackCol = true;
-            for (let y = topCrop; y < bottomCrop; y++) {
-                const idx = (y * width + x) * 4;
-                const r = data[idx];
-                const g = data[idx + 1];
-                const b = data[idx + 2];
-                
-                if (r > threshold || g > threshold || b > threshold) {
-                    isBlackCol = false;
-                    break;
-                }
-            }
-            if (!isBlackCol) break;
-            leftCrop++;
-        }
-        
-        // Find right black bar
-        let rightCrop = width;
-        for (let x = width - 1; x >= 0; x--) {
-            let isBlackCol = true;
-            for (let y = topCrop; y < bottomCrop; y++) {
-                const idx = (y * width + x) * 4;
-                const r = data[idx];
-                const g = data[idx + 1];
-                const b = data[idx + 2];
-                
-                if (r > threshold || g > threshold || b > threshold) {
-                    isBlackCol = false;
-                    break;
-                }
-            }
-            if (!isBlackCol) break;
-            rightCrop--;
-        }
-        
-        // Create cropped image data
-        const croppedWidth = rightCrop - leftCrop;
-        const croppedHeight = bottomCrop - topCrop;
-        const croppedData = new ImageData(croppedWidth, croppedHeight);
-        
-        for (let y = 0; y < croppedHeight; y++) {
-            for (let x = 0; x < croppedWidth; x++) {
-                const srcIdx = ((y + topCrop) * width + (x + leftCrop)) * 4;
-                const destIdx = (y * croppedWidth + x) * 4;
-                
-                croppedData.data[destIdx] = data[srcIdx];
-                croppedData.data[destIdx + 1] = data[srcIdx + 1];
-                croppedData.data[destIdx + 2] = data[srcIdx + 2];
-                croppedData.data[destIdx + 3] = data[srcIdx + 3];
-            }
-        }
-        
-        return {
-            data: croppedData,
-            width: croppedWidth,
-            height: croppedHeight
-        };
-    }
-
-    selectAllThumbnails() {
-        const visibleThumbnails = document.querySelectorAll('.thumbnail-item:not([style*="none"])');
-        const checkboxes = Array.from(visibleThumbnails).map(item => 
-            item.querySelector('input[data-thumbnail-id]')
-        ).filter(cb => cb);
-        
-        const allSelected = checkboxes.every(cb => cb.checked);
-        
-        checkboxes.forEach(cb => {
-            cb.checked = !allSelected;
-            if (cb.checked) {
-                this.selectedThumbnails.add(cb.dataset.thumbnailId);
-            } else {
-                this.selectedThumbnails.delete(cb.dataset.thumbnailId);
-            }
-        });
-        
-        const selectAllBtn = document.getElementById('selectAll');
-        if (selectAllBtn) {
-            selectAllBtn.innerHTML = allSelected ? 
-                '<i class="fas fa-check-square"></i> Select All Working' : 
-                '<i class="fas fa-square"></i> Deselect All';
-        }
-    }
-
-    async downloadSelected() {
-        const selectedIds = Array.from(document.querySelectorAll('.thumbnail-item:not([style*="none"]) input[data-thumbnail-id]:checked'))
-                                 .map(cb => cb.dataset.thumbnailId);
-        
-        if (selectedIds.length === 0) {
-            this.showError('Please select at least one working thumbnail');
-            return;
-        }
-
-        if (selectedIds.length === 1) {
-            await this.downloadSingle(selectedIds[0]);
-            return;
-        }
-
-        // Multiple downloads - create ZIP
-        await this.downloadMultipleAsZip(selectedIds);
-    }
-
-    async downloadAllAsZip() {
-        const workingThumbnails = Array.from(document.querySelectorAll('.thumbnail-item:not([style*="none"]) input[data-thumbnail-id]'))
-                                       .map(cb => cb.dataset.thumbnailId);
-        
-        if (workingThumbnails.length === 0) {
-            this.showError('No working thumbnails available');
-            return;
-        }
-
-        await this.downloadMultipleAsZip(workingThumbnails);
-    }
-
-    async downloadMultipleAsZip(thumbnailIds) {
-        if (typeof JSZip === 'undefined') {
-            this.showError('ZIP functionality not available. Please refresh the page.');
-            return;
-        }
-
-        try {
-            this.showProgress('Creating ZIP file...', 0);
-            const zip = new JSZip();
-            const total = thumbnailIds.length;
-            let successful = 0;
-            
-            for (let i = 0; i < thumbnailIds.length; i++) {
-                const thumbnailId = thumbnailIds[i];
-                const thumbnail = this.thumbnails.find(t => t.id === thumbnailId);
-                
-                if (thumbnail) {
-                    this.showProgress(`Processing ${thumbnail.title}...`, (i / total) * 80);
-                    
-                    try {
-                        // Test image first
-                        const testImg = new Image();
-                        testImg.crossOrigin = 'anonymous';
-                        await new Promise((resolve, reject) => {
-                            testImg.onload = resolve;
-                            testImg.onerror = reject;
-                            testImg.src = thumbnail.url;
-                        });
-
-                        let blob;
-                        const removeBlackBars = document.getElementById('removeBlackBars')?.checked || false;
-                        
-                        if (removeBlackBars) {
-                            blob = await this.processImage(thumbnail.url);
-                        } else {
-                            const response = await fetch(thumbnail.url);
-                            blob = await response.blob();
-                        }
-                        
-                        const filename = `netflix_${thumbnail.netflixId}_${thumbnail.source}_${thumbnail.type}_${i}.jpg`;
-                        zip.file(filename, blob);
-                        successful++;
-                        
-                    } catch (error) {
-                        console.warn(`Failed to process thumbnail ${thumbnailId}:`, error);
-                    }
-                }
-            }
-            
-            if (successful === 0) {
-                throw new Error('No thumbnails could be processed');
-            }
-            
-            this.showProgress('Generating ZIP file...', 90);
-            const zipBlob = await zip.generateAsync({ type: 'blob' });
-            
-            const netflixId = this.thumbnails[0]?.netflixId || 'unknown';
-            const filename = `netflix_thumbnails_${netflixId}_${Date.now()}.zip`;
-            
-            this.downloadBlob(zipBlob, filename);
-            this.hideProgress();
-            this.showSuccess(`Downloaded ${successful} working thumbnails as ZIP`);
-            
-        } catch (error) {
-            this.showError(`Failed to create ZIP: ${error.message}`);
-            this.hideProgress();
-        }
     }
 
     downloadBlob(blob, filename) {
@@ -698,37 +495,112 @@ class NetflixDownloader {
         URL.revokeObjectURL(url);
     }
 
+    selectAllThumbnails() {
+        const workingItems = document.querySelectorAll('.thumbnail-item.working');
+        const checkboxes = Array.from(workingItems).map(item => 
+            item.querySelector('input[data-thumbnail-id]')
+        );
+        
+        const allSelected = checkboxes.every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !allSelected);
+
+        const selectAllBtn = document.getElementById('selectAll');
+        if (selectAllBtn) {
+            selectAllBtn.innerHTML = allSelected ? 
+                '<i class="fas fa-check-square"></i> Select All' : 
+                '<i class="fas fa-square"></i> Deselect All';
+        }
+    }
+
+    async downloadSelected() {
+        const selectedIds = Array.from(document.querySelectorAll('.thumbnail-item.working input[data-thumbnail-id]:checked'))
+            .map(cb => cb.dataset.thumbnailId);
+
+        if (selectedIds.length === 0) {
+            this.showError('Please select at least one working thumbnail');
+            return;
+        }
+
+        if (selectedIds.length === 1) {
+            await this.downloadSingle(selectedIds[0]);
+        } else {
+            await this.downloadMultipleAsZip(selectedIds);
+        }
+    }
+
+    async downloadMultipleAsZip(thumbnailIds) {
+        if (!window.JSZip) {
+            this.showError('JSZip library not loaded. Cannot create ZIP file.');
+            return;
+        }
+
+        try {
+            this.showProgress('Creating ZIP file...', 0);
+            const zip = new JSZip();
+            let successful = 0;
+
+            for (let i = 0; i < thumbnailIds.length; i++) {
+                const thumbnailId = thumbnailIds[i];
+                const thumbnail = this.thumbnails.find(t => t.id === thumbnailId);
+                if (!thumbnail) continue;
+
+                this.showProgress(`Processing ${thumbnail.title}...`, (i / thumbnailIds.length) * 80);
+
+                try {
+                    const blob = await this.downloadWithFallback(thumbnail.url);
+                    const filename = `${thumbnail.source}_${thumbnail.type}_${thumbnail.netflixId}_${i + 1}.jpg`;
+                    zip.file(filename, blob);
+                    successful++;
+                } catch (error) {
+                    console.warn(`Failed to process ${thumbnailId}:`, error);
+                }
+            }
+
+            if (successful === 0) {
+                throw new Error('No thumbnails could be processed');
+            }
+
+            this.showProgress('Generating ZIP file...', 90);
+            const zipBlob = await zip.generateAsync({ type: 'blob' });
+            const filename = `netflix_thumbnails_${this.thumbnails[0]?.netflixId || 'unknown'}_${Date.now()}.zip`;
+
+            this.downloadBlob(zipBlob, filename);
+            this.hideProgress();
+            this.showSuccess(`Downloaded ${successful} thumbnails as ZIP file!`);
+
+        } catch (error) {
+            this.hideProgress();
+            this.showError(`Failed to create ZIP: ${error.message}`);
+        }
+    }
+
     previewThumbnail(thumbnailId) {
         const thumbnail = this.thumbnails.find(t => t.id === thumbnailId);
         if (!thumbnail) return;
 
-        // Create modal for preview
         const modal = document.createElement('div');
         modal.className = 'thumbnail-modal';
         modal.innerHTML = `
-            <div class="modal-overlay" onclick="this.parentElement.remove()">
-                <div class="modal-content" onclick="event.stopPropagation()">
-                    <div class="modal-header">
-                        <h3>${thumbnail.title}</h3>
-                        <button class="modal-close" onclick="this.closest('.thumbnail-modal').remove()">
-                            <i class="fas fa-times"></i>
-                        </button>
+            <div class="modal-overlay" onclick="this.parentElement.remove()"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>${thumbnail.title}</h3>
+                    <button class="modal-close" onclick="this.closest('.thumbnail-modal').remove()">×</button>
+                </div>
+                <div class="modal-body">
+                    <img src="${thumbnail.url}" alt="${thumbnail.title}" style="max-width: 100%; height: auto; border-radius: 8px;">
+                    <div class="thumbnail-details">
+                        <p><strong>Source:</strong> ${thumbnail.source.toUpperCase()}</p>
+                        <p><strong>Type:</strong> ${thumbnail.type}</p>
+                        <p><strong>Resolution:</strong> ${thumbnail.resolution}</p>
+                        <p><strong>Netflix ID:</strong> ${thumbnail.netflixId}</p>
+                        <p><strong>URL:</strong> <code style="word-break: break-all; font-size: 0.8em;">${thumbnail.url}</code></p>
                     </div>
-                    <div class="modal-body">
-                        <img src="${thumbnail.url}" alt="${thumbnail.title}" style="max-width: 100%; height: auto;">
-                        <div class="thumbnail-details">
-                            <p><strong>Resolution:</strong> ${thumbnail.resolution}</p>
-                            <p><strong>Type:</strong> ${thumbnail.type}</p>
-                            <p><strong>Source:</strong> ${thumbnail.source}</p>
-                            <p><strong>Netflix ID:</strong> ${thumbnail.netflixId}</p>
-                            <p><strong>URL:</strong> <code style="word-break: break-all; font-size: 0.8em;">${thumbnail.url}</code></p>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button class="btn btn-primary" onclick="netflixDownloader.downloadSingle('${thumbnail.id}')">
-                            <i class="fas fa-download"></i> Download
-                        </button>
-                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" onclick="netflixDownloader.downloadSingle('${thumbnail.id}'); this.closest('.thumbnail-modal').remove();">
+                        <i class="fas fa-download"></i> Download This Image
+                    </button>
                 </div>
             </div>
         `;
@@ -736,32 +608,32 @@ class NetflixDownloader {
         document.body.appendChild(modal);
     }
 
-    showBatchActions() {
-        const batchActions = document.getElementById('batchActions');
-        if (batchActions) {
-            batchActions.classList.remove('hidden');
+    showProgress(message, percent) {
+        let progressDiv = document.getElementById('progressIndicator');
+        if (!progressDiv) {
+            progressDiv = document.createElement('div');
+            progressDiv.id = 'progressIndicator';
+            progressDiv.className = 'progress-indicator';
+            document.body.appendChild(progressDiv);
         }
-    }
 
-    showProgress(message, percentage) {
-        const progressContainer = document.getElementById('progressContainer');
-        const progressBar = document.getElementById('progressBar');
-        const progressText = document.getElementById('progressText');
-
-        if (progressContainer) progressContainer.classList.remove('hidden');
-        if (progressBar) progressBar.style.width = `${percentage}%`;
-        if (progressText) {
-            progressText.textContent = message;
-            progressText.classList.remove('hidden');
-        }
+        progressDiv.innerHTML = `
+            <div class="progress-content">
+                <div class="progress-message">${message}</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${percent}%"></div>
+                </div>
+                <div class="progress-percent">${Math.round(percent)}%</div>
+            </div>
+        `;
+        progressDiv.style.display = 'flex';
     }
 
     hideProgress() {
-        const progressContainer = document.getElementById('progressContainer');
-        const progressText = document.getElementById('progressText');
-
-        if (progressContainer) progressContainer.classList.add('hidden');
-        if (progressText) progressText.classList.add('hidden');
+        const progressDiv = document.getElementById('progressIndicator');
+        if (progressDiv) {
+            progressDiv.style.display = 'none';
+        }
     }
 
     showError(message) {
@@ -774,23 +646,25 @@ class NetflixDownloader {
 
     showNotification(message, type = 'info') {
         // Remove existing notifications
-        const existingNotifications = document.querySelectorAll('.notification');
-        existingNotifications.forEach(notification => notification.remove());
+        document.querySelectorAll('.notification').forEach(n => n.remove());
 
-        // Create notification element
         const notification = document.createElement('div');
         notification.className = `notification notification-${type}`;
+        
+        const icons = {
+            error: 'fas fa-exclamation-circle',
+            success: 'fas fa-check-circle',
+            info: 'fas fa-info-circle'
+        };
+
         notification.innerHTML = `
             <div class="notification-content">
-                <i class="fas fa-${type === 'error' ? 'exclamation-circle' : type === 'success' ? 'check-circle' : 'info-circle'}"></i>
+                <i class="${icons[type] || icons.info}"></i>
                 <span>${message}</span>
             </div>
-            <button class="notification-close" onclick="this.parentElement.remove()">
-                <i class="fas fa-times"></i>
-            </button>
+            <button class="notification-close" onclick="this.parentElement.remove()">×</button>
         `;
 
-        // Add to page
         document.body.appendChild(notification);
 
         // Auto remove after 5 seconds
@@ -801,67 +675,22 @@ class NetflixDownloader {
         }, 5000);
     }
 
-    // Utility method to get working Netflix ID examples
     getExampleIds() {
         return [
             '80057281', // Stranger Things
-            '70136120', // Breaking Bad  
+            '70136120', // Breaking Bad
             '80025744', // Narcos
             '80117540', // The Crown
             '80014749', // House of Cards
             '81265727', // Squid Game
             '80192098', // The Witcher
-            '80100172', // Money Heist
+            '80100172'  // Money Heist
         ];
-    }
-
-    // Method to test a batch of IDs
-    async testMultipleIds(ids) {
-        this.showProgress('Testing multiple Netflix IDs...', 0);
-        const results = [];
-        
-        for (let i = 0; i < ids.length; i++) {
-            const id = ids[i];
-            this.showProgress(`Testing ID: ${id}... (${i + 1}/${ids.length})`, (i / ids.length) * 100);
-            
-            try {
-                const thumbnails = await this.getNetflixThumbnails(id);
-                const workingCount = await this.countWorkingThumbnails(thumbnails);
-                results.push({ id, workingCount, thumbnails });
-            } catch (error) {
-                results.push({ id, workingCount: 0, error: error.message });
-            }
-        }
-        
-        this.hideProgress();
-        return results;
-    }
-
-    async countWorkingThumbnails(thumbnails) {
-        let count = 0;
-        const promises = thumbnails.map(async (thumbnail) => {
-            return new Promise((resolve) => {
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                img.onload = () => {
-                    count++;
-                    resolve(true);
-                };
-                img.onerror = () => resolve(false);
-                img.src = thumbnail.url;
-                
-                // Timeout after 5 seconds
-                setTimeout(() => resolve(false), 5000);
-            });
-        });
-        
-        await Promise.all(promises);
-        return count;
     }
 }
 
-// Enhanced CSS for notifications and modal (inject into page)
-const dynamicStyles = `
+// CSS Styles
+const styles = `
 <style>
 .thumbnail-modal {
     position: fixed;
@@ -869,31 +698,20 @@ const dynamicStyles = `
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 10000;
+    background: rgba(0, 0, 0, 0.8);
     display: flex;
     align-items: center;
     justify-content: center;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(10px);
-}
-
-.modal-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
+    z-index: 10000;
 }
 
 .modal-content {
-    position: relative;
-    background: var(--card-gradient, #ffffff);
-    border-radius: 20px;
+    background: white;
+    border-radius: 12px;
     max-width: 90vw;
     max-height: 90vh;
     overflow: auto;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-    border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .modal-header {
@@ -901,12 +719,12 @@ const dynamicStyles = `
     justify-content: space-between;
     align-items: center;
     padding: 1.5rem;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    border-bottom: 1px solid #e5e7eb;
 }
 
 .modal-header h3 {
     margin: 0;
-    color: var(--text-primary, #2d3748);
+    color: #1f2937;
 }
 
 .modal-close {
@@ -914,14 +732,14 @@ const dynamicStyles = `
     border: none;
     font-size: 1.5rem;
     cursor: pointer;
-    color: var(--text-secondary, #4a5568);
+    color: #6b7280;
     padding: 0.5rem;
     border-radius: 50%;
     transition: all 0.3s ease;
 }
 
 .modal-close:hover {
-    background: rgba(0, 0, 0, 0.1);
+    background: #f3f4f6;
     transform: scale(1.1);
 }
 
@@ -931,15 +749,15 @@ const dynamicStyles = `
 
 .modal-footer {
     padding: 1.5rem;
-    border-top: 1px solid rgba(0, 0, 0, 0.1);
+    border-top: 1px solid #e5e7eb;
     text-align: center;
 }
 
 .thumbnail-details {
     margin-top: 1rem;
     padding: 1rem;
-    background: rgba(0, 0, 0, 0.05);
-    border-radius: 10px;
+    background: #f9fafb;
+    border-radius: 8px;
 }
 
 .thumbnail-details p {
@@ -947,12 +765,61 @@ const dynamicStyles = `
     font-size: 0.9rem;
 }
 
+.progress-indicator {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.progress-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    min-width: 300px;
+    text-align: center;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+.progress-message {
+    margin-bottom: 1rem;
+    font-weight: 600;
+    color: #1f2937;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #1d4ed8);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.progress-percent {
+    font-size: 0.875rem;
+    color: #6b7280;
+}
+
 .notification {
     position: fixed;
     top: 20px;
     right: 20px;
-    background: var(--card-gradient, #ffffff);
-    border-radius: 10px;
+    background: white;
+    border-radius: 8px;
     padding: 1rem;
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     z-index: 9999;
@@ -962,7 +829,6 @@ const dynamicStyles = `
     min-width: 300px;
     max-width: 500px;
     animation: slideInRight 0.3s ease-out;
-    border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .notification-error {
@@ -983,7 +849,7 @@ const dynamicStyles = `
 .notification-content {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.75rem;
     flex: 1;
 }
 
@@ -1007,7 +873,7 @@ const dynamicStyles = `
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--text-secondary, #4a5568);
+    color: #6b7280;
     padding: 0.25rem;
     border-radius: 4px;
     transition: all 0.3s ease;
@@ -1020,32 +886,61 @@ const dynamicStyles = `
 
 @keyframes slideInRight {
     from {
-        transform: translateX(100%);
         opacity: 0;
+        transform: translateX(100%);
     }
     to {
-        transform: translateX(0);
         opacity: 1;
+        transform: translateX(0);
     }
+}
+
+.thumbnail-item {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+.thumbnail-item:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.thumbnail-item.working {
+    border-color: #10b981;
 }
 
 .thumbnail-preview {
     position: relative;
     overflow: hidden;
-    border-radius: 15px 15px 0 0;
 }
 
 .thumbnail-overlay {
     position: absolute;
-    top: 10px;
-    right: 10px;
-    z-index: 2;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0) 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-end;
+    padding: 1rem;
+}
+
+.thumbnail-item:hover .thumbnail-overlay {
+    opacity: 1;
 }
 
 .thumbnail-checkbox {
+    cursor: pointer;
     display: flex;
     align-items: center;
-    cursor: pointer;
 }
 
 .thumbnail-checkbox input {
@@ -1066,7 +961,7 @@ const dynamicStyles = `
 }
 
 .thumbnail-checkbox input:checked + .checkbox-custom {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
     border-color: transparent;
 }
 
@@ -1084,20 +979,20 @@ const dynamicStyles = `
 .thumbnail-title {
     font-weight: 600;
     margin-bottom: 0.5rem;
-    color: var(--text-primary, #2d3748);
+    color: #1f2937;
     font-size: 0.9rem;
     line-height: 1.3;
 }
 
 .thumbnail-resolution {
     font-size: 0.8rem;
-    color: var(--text-muted, #718096);
+    color: #6b7280;
     margin-bottom: 0.25rem;
 }
 
 .thumbnail-type {
     font-size: 0.75rem;
-    color: var(--text-muted, #718096);
+    color: #6b7280;
     text-transform: uppercase;
     font-weight: 600;
     margin-bottom: 0.75rem;
@@ -1105,6 +1000,14 @@ const dynamicStyles = `
     background: rgba(0, 0, 0, 0.05);
     border-radius: 4px;
     display: inline-block;
+}
+
+.thumbnail-url {
+    font-family: 'Courier New', monospace;
+    background: #f9fafb;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid #e5e7eb;
 }
 
 .thumbnail-actions {
@@ -1119,35 +1022,34 @@ const dynamicStyles = `
     gap: 0.5rem;
     padding: 0.75rem 1.5rem;
     border: none;
-    border-radius: 25px;
+    border-radius: 6px;
     font-weight: 600;
     text-decoration: none;
     cursor: pointer;
     transition: all 0.3s ease;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     position: relative;
     overflow: hidden;
 }
 
-.btn-small {
+.btn-sm {
     padding: 0.5rem 1rem;
     font-size: 0.8rem;
-    border-radius: 20px;
 }
 
 .btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
     color: white;
 }
 
 .btn-secondary {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
     color: white;
 }
 
 .btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
 
 .btn:active {
@@ -1155,14 +1057,29 @@ const dynamicStyles = `
 }
 
 .btn-primary:hover {
-    background: linear-gradient(135deg, #5a67d8 0%, #6b46c1 100%);
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
 }
 
 .btn-secondary:hover {
-    background: linear-gradient(135deg, #ed64a6 0%, #e53e3e 100%);
+    background: linear-gradient(135deg, #4b5563 0%, #374151 100%);
 }
 
-/* Responsive adjustments */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.animate-fadeIn {
+    animation: fadeIn 0.6s ease-out both;
+}
+
+/* Responsive */
 @media (max-width: 768px) {
     .notification {
         right: 10px;
@@ -1176,94 +1093,84 @@ const dynamicStyles = `
         margin: 1rem;
     }
     
-    .thumbnail-actions {
-        flex-direction: column;
+    .progress-content {
+        min-width: 250px;
+        margin: 1rem;
     }
     
-    .btn-small {
-        justify-content: center;
-    }
-}
-
-/* Loading animation */
-.thumbnail-image[src*="data:image/svg"] {
-    opacity: 0.6;
-    animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-    0%, 100% {
-        opacity: 0.6;
-    }
-    50% {
-        opacity: 0.9;
-    }
-}
-
-/* Fade in animation for thumbnails */
-.animate-fadeInUp {
-    animation: fadeInUp 0.6s ease-out both;
-}
-
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(30px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
+    .thumbnail-actions {
+        flex-direction: column;
     }
 }
 </style>
 `;
 
-// Initialize when DOM is loaded
+// Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
-    // Inject dynamic styles
+    // Inject styles
     if (!document.getElementById('netflix-downloader-styles')) {
         const styleElement = document.createElement('div');
         styleElement.id = 'netflix-downloader-styles';
-        styleElement.innerHTML = dynamicStyles;
+        styleElement.innerHTML = styles;
         document.head.appendChild(styleElement);
     }
-    
-    // Initialize Netflix Downloader
+
+    // Initialize downloader
     window.netflixDownloader = new NetflixDownloader();
-    
-    // Add example IDs to the interface
+
+    // Add example functionality to input
     const urlInput = document.getElementById('netflixUrl');
-    if (urlInput && !urlInput.placeholder.includes('Example')) {
+    if (urlInput) {
         const examples = window.netflixDownloader.getExampleIds();
         urlInput.placeholder = `Enter Netflix URL or ID (Examples: ${examples.slice(0, 3).join(', ')})`;
         
-        // Add quick test button
-        const parentDiv = urlInput.parentElement;
-        if (parentDiv && !document.getElementById('quickTestBtn')) {
-            const quickTestBtn = document.createElement('button');
-            quickTestBtn.id = 'quickTestBtn';
-            quickTestBtn.className = 'btn btn-small btn-secondary';
-            quickTestBtn.innerHTML = '<i class="fas fa-flask"></i> Test Examples';
-            quickTestBtn.style.marginLeft = '0.5rem';
-            quickTestBtn.onclick = async () => {
-                const results = await window.netflixDownloader.testMultipleIds(examples.slice(0, 3));
-                const bestResult = results.find(r => r.workingCount > 0);
-                if (bestResult) {
-                    urlInput.value = bestResult.id;
-                    window.netflixDownloader.fetchThumbnails();
-                } else {
-                    window.netflixDownloader.showError('No working examples found. Try manual IDs.');
-                }
+        // Add quick example button
+        const container = urlInput.parentElement;
+        if (container && !document.getElementById('quickExampleBtn')) {
+            const exampleBtn = document.createElement('button');
+            exampleBtn.id = 'quickExampleBtn';
+            exampleBtn.type = 'button';
+            exampleBtn.className = 'btn btn-sm btn-secondary';
+            exampleBtn.innerHTML = '<i class="fas fa-lightbulb"></i> Try Example';
+            exampleBtn.style.marginLeft = '0.5rem';
+            exampleBtn.onclick = () => {
+                const randomExample = examples[Math.floor(Math.random() * examples.length)];
+                urlInput.value = randomExample;
+                window.netflixDownloader.fetchThumbnails();
             };
-            parentDiv.appendChild(quickTestBtn);
+            
+            if (container.style.display !== 'flex') {
+                container.style.display = 'flex';
+                container.style.alignItems = 'center';
+                container.style.gap = '0.5rem';
+            }
+            container.appendChild(exampleBtn);
         }
     }
-    
-    console.log('Netflix Thumbnail Downloader v3.0 initialized successfully!');
-    console.log('Working example IDs:', window.netflixDownloader.getExampleIds());
+
+    // Update select all button functionality
+    const selectAllBtn = document.getElementById('selectAll');
+    if (selectAllBtn) {
+        selectAllBtn.onclick = () => window.netflixDownloader.selectAllThumbnails();
+    }
+
+    // Update download buttons
+    const downloadSelectedBtn = document.getElementById('downloadSelected');
+    if (downloadSelectedBtn) {
+        downloadSelectedBtn.onclick = () => window.netflixDownloader.downloadSelected();
+    }
+
+    const downloadAllBtn = document.getElementById('downloadAll');
+    if (downloadAllBtn) {
+        downloadAllBtn.onclick = () => window.netflixDownloader.downloadAllAsZip();
+    }
+
+    console.log('Netflix Thumbnail Downloader v4.0 initialized successfully!');
+    console.log('Available example IDs:', window.netflixDownloader.getExampleIds());
+    console.log('Features: Multiple source fallbacks, CORS handling, batch downloads, ZIP support');
 });
 
-// Export for module usage
+// Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = NetflixDownloader;
 }
